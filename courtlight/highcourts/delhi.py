@@ -1,6 +1,23 @@
 #!/usr/bin/env python3
 """
-Scrape data from Delhi High Court Website
+Scrape data from Delhi High Court Website.
+
+The website is in PHP, and makes extremely heavy use of
+PHP Server Side Sessions. The way it does pagination is:
+
+1. You visit the 'home' page. This makes a new PHP session for you.
+2. You send a POST request to a query URL with your search
+   query
+3. You get first page of results, and in the server-side session
+   your query info is saved
+4. For the following pages, you send a GET request to the same URL,
+   with just an offset param - nothing at all about the original query!
+   So you can only linearly ask for pages for one judge at a time,
+   one period at a time, per cookie jar.
+
+We first gather the list of all judges, and use a new ClientSession
+for each judge. This lets us cleanly separate cookie jars, and
+increase concurrency in the future if we need.
 """
 
 import aiohttp
