@@ -22,6 +22,7 @@ increase concurrency in the future if we need.
 
 import aiohttp
 import asyncio
+import argparse
 import backoff
 import json
 from lxml import html
@@ -64,7 +65,7 @@ def parse_judgements(judge_name, doc):
             yield judgement
 
 @backoff.on_exception(backoff.expo, Exception, max_time=120, jitter=backoff.full_jitter)
-async def fetch_judgements(judge_name, judge_id):
+async def fetch_judgements(judge_name, judge_id, from_date, to_date):
     async with aiohttp.ClientSession() as session:
         # Get ourselves a session cokie
         initial_url = 'http://lobis.nic.in/dhcindex.php?cat=1&hc=31'
@@ -74,8 +75,8 @@ async def fetch_judgements(judge_name, judge_id):
 
         post_data = {
             'ctype': judge_id,
-            'frdate': '01/01/2018',
-            'todate': '31/12/2018',
+            'frdate': from_date,
+            'todate': to_date,
             'Submit': 'Submit'
         }
         async with session.post(judgements_url, data=post_data) as response:
@@ -100,10 +101,23 @@ async def fetch_judgements(judge_name, judge_id):
 
                 
 async def main():
+    args = parse_args()
     async for name, judge_id in fetch_judges():
-        async for judgement in fetch_judgements(name, judge_id):
+        async for judgement in fetch_judgements(name, judge_id, args.from_date, args.to_date):
             print(json.dumps(judgement))
 
+
+def parse_args():
+    argparser = argparse.ArgumentParser()
+    argparser.add_argument(
+        'from_date',
+        help='Date to start looking for judgements from, in format dd/mm/yyyy'
+    )
+    argparser.add_argument(
+        'to_date',
+        help='Date to look for judgements till, in format dd/mm/yyyy'
+    )
+    return argparser.parse_args()
 
 loop = asyncio.get_event_loop()
 loop.run_until_complete(main())
