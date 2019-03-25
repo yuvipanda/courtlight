@@ -1,10 +1,12 @@
 import os
 from urllib.parse import quote
 import asyncio
+import backoff
 
 import aiohttp
 import pandas as pd
 
+@backoff.on_exception(backoff.expo, Exception, max_time=120, jitter=backoff.full_jitter)
 async def download_file(session, url, target_path):
     async with session.get(url) as response:
         with open(target_path, 'wb') as f:
@@ -28,6 +30,7 @@ async def main():
             if not os.path.exists(download_path):
                 await download_file(session, download_link, download_path)
                 print(f'Downloaded {download_link}')
+                await asyncio.sleep(0.5)
 
 
 loop = asyncio.get_event_loop()
