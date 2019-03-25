@@ -27,7 +27,36 @@ import backoff
 import json
 from lxml import html
 from functools import partial
+from urllib.parse import quote
+import os
+import hashlib
 
+
+@backoff.on_exception(backoff.expo, Exception, max_time=120, jitter=backoff.full_jitter)
+async def download_file(session, url, target_path):
+    hash = hashlib.sha256()
+    async with session.get(url) as response:
+        with open(target_path, 'wb') as f:
+            while True:
+                chunk = await response.content.read(32 * 1024)
+                if not chunk:
+                    break
+                f.write(chunk)
+                hash.update(chunk)
+    return hash.hexdigest()
+
+
+def hash_for_file(path):
+    hash = hashlib.sha256()
+    with open(path, 'rb') as f:
+        hash.update(f.read())
+    return hash.hexdigest()
+
+def filename_for_download_link(download_link):
+    return os.path.join(
+        'judgements',
+        quote(download_link, safe='.')
+    )
 
 async def fetch_judges():
     async with aiohttp.ClientSession() as session:
@@ -43,7 +72,7 @@ async def fetch_judges():
                 judge_id = judge.attrib['value'].strip()
                 yield (name, judge_id)
 
-def parse_judgements(judge_name, doc):
+async def process_judge(session, judge_name, doc):
     for tr in doc.cssselect('table[align="center"] tr'):
         link = tr[1][0]
         if 'href' in link.attrib:
@@ -54,12 +83,21 @@ def parse_judgements(judge_name, doc):
 
             party = tr[3].text_content()
 
+            download_path = filename_for_download_link(download_link)
+
+            if not os.path.exists(download_path):
+                file_hash = await download_file(session, download_link, download_path)
+            else:
+                file_hash = hash_for_file(download_path)
+
             judgement = {
                 'download_link': download_link,
                 'case_number': case_number,
                 'date': date,
                 'party': party,
-                'judge_name': judge_name
+                'judge_name': judge_name,
+                'download_path': download_path,
+                'judgement_hash': file_hash
             }
             
             yield judgement
@@ -84,7 +122,7 @@ async def fetch_judgements(judge_name, judge_id, from_date, to_date):
             doc = html.document_fromstring(text)
             doc.make_links_absolute(judgements_url)
 
-            for judgement in parse_judgements(judge_name, doc):
+            async for judgement in process_judge(session, judge_name, doc):
                 yield judgement
 
             # check for a 'next' URL
@@ -96,7 +134,7 @@ async def fetch_judgements(judge_name, judge_id, from_date, to_date):
                 async with session.get(next_url) as get_response:
                     doc = html.document_fromstring(await get_response.text())
                     doc.make_links_absolute(next_url)
-                    for judgement in parse_judgements(judge_name, doc):
+                    async for judgement in process_judge(session, judge_name, doc):
                         yield judgement
 
                 
