@@ -29,6 +29,7 @@ from lxml import html
 from functools import partial
 from urllib.parse import quote
 import os
+import subprocess
 import hashlib
 
 
@@ -50,6 +51,13 @@ def hash_for_file(path):
     hash = hashlib.sha256()
     with open(path, 'rb') as f:
         hash.update(f.read())
+    return hash.hexdigest()
+
+
+def hash_for_text(pdf_path):
+    text = subprocess.check_output(['pdftotext', pdf_path, '-'])
+    hash = hashlib.sha256()
+    hash.update(text)
     return hash.hexdigest()
 
 def filename_for_download_link(download_link):
@@ -86,9 +94,10 @@ async def process_judge(session, judge_name, doc):
             download_path = filename_for_download_link(download_link)
 
             if not os.path.exists(download_path):
-                file_hash = await download_file(session, download_link, download_path)
+                await download_file(session, download_link, download_path)
+                text_hash = hash_for_text(download_path)
             else:
-                file_hash = hash_for_file(download_path)
+                text_hash = hash_for_text(download_path)
 
             judgement = {
                 'download_link': download_link,
@@ -97,7 +106,7 @@ async def process_judge(session, judge_name, doc):
                 'party': party,
                 'judge_name': judge_name,
                 'download_path': download_path,
-                'judgement_hash': file_hash
+                'judgement_text_hash': text_hash
             }
             
             yield judgement
