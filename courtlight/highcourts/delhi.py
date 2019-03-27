@@ -13,14 +13,14 @@ PHP Server Side Sessions. The way it does pagination is:
 4. For the following pages, you send a GET request to the same URL,
    with just an offset param - nothing at all about the original query!
    So you can only linearly ask for pages for one judge at a time,
-   one period at a time, per cookie jar.
-
+   one period at a time, per cookie jar. 
 We first gather the list of all judges, and use a new ClientSession
 for each judge. This lets us cleanly separate cookie jars, and 
 increase concurrency in the future if we need.
 """
 
 import aiohttp
+import logging
 import asyncio
 import argparse
 import backoff
@@ -31,6 +31,11 @@ from urllib.parse import quote
 import os
 import subprocess
 import hashlib
+import orm
+from sqlalchemy import create_engine, exists
+from sqlalchemy.orm import sessionmaker
+
+
 
 def filename_for_download_link(download_link):
     return os.path.join(
@@ -79,7 +84,7 @@ def cases_from_page(judge_name, doc):
             case = {
                 'pdf_link': pdf_link,
                 'case_number': case_number,
-                'date': date.isoformat(),
+                'date': date,
                 'party': party,
                 'judge_name': judge_name,
             }
@@ -128,9 +133,53 @@ async def fetch_cases(judge_name, judge_id, from_date, to_date):
                 
 async def main():
     args = parse_args()
+
+    logging.basicConfig(format='%(asctime)s %(message)s', level=logging.INFO)
+
+    Session = sessionmaker()
+    engine = create_engine(f'sqlite:///{args.db_path}')
+    orm.Base.metadata.create_all(engine)
+    Session.configure(bind=engine)
+    session = Session()
+
     async for name, judge_id in fetch_judges():
-        async for case in fetch_cases(name, judge_id, args.from_date, args.to_date):
-            print(json.dumps(case))
+        # Check if judge exists, if not create
+        logging.info(f'Started scraping cases for {name}')
+        judge = session.query(orm.Judge).filter_by(name=name).first()
+        if not judge:
+            judge = orm.Judge(name=name)
+            session.add(judge)
+
+        from ipdb import set_trace
+        set_trace()
+
+        async for case_data in fetch_cases(name, judge_id, args.from_date, args.to_date):
+            case_number = case_data['case_number']
+            pdf_link = case_data['pdf_link'] 
+            date = case_data['date'] 
+            
+
+            # Create Judgement if it doesn't exist
+            judgement = session.query(orm.Judgement).filter_by(pdf_link=pdf_link).first()
+            if not judgement:
+                judgement = orm.Judgement(pdf_link=pdf_link, date=date)
+                session.add(judgement)
+
+            if judge not in judgement.judges:
+                judgement.judges.append(judge)
+                session.add(judgement)
+                logging.info(f'Added judge {name} to case {case_number}')
+
+            # If case number exists, we skip
+            if not session.query(exists().where(orm.Case.case_number==case_number)).scalar():
+                case = orm.Case(case_number=case_data['case_number'], party=case_data['party'], judgement=judgement)
+                session.add(case)
+            else:
+                logging.info(f'{case_number} skipped, already exists')
+            logging.info(f'Added case entry for {case_number}')
+
+    # Commit only on success. This keeps our db churn small
+    session.commit()
 
 
 def parse_args():
@@ -142,6 +191,10 @@ def parse_args():
     argparser.add_argument(
         'to_date',
         help='Date to look for judgements till, in format dd/mm/yyyy'
+    )
+    argparser.add_argument(
+        'db_path',
+        help='Path to sqlite database for writing data into'
     )
     return argparser.parse_args()
 
