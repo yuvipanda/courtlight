@@ -155,8 +155,7 @@ async def main():
             # Create Judgement if it doesn't exist
             judgement = session.query(orm.Judgement).filter_by(pdf_link=pdf_link).first()
             if not judgement:
-                judgement = orm.Judgement(pdf_link=pdf_link, date=date)
-                judgement.judges.append(judgement)
+                judgement = orm.Judgement(pdf_link=pdf_link, date=date, judges=[judge])
                 session.add(judgement)
             else:
                 if judge not in judgement.judges:
