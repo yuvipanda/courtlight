@@ -36,3 +36,14 @@ class Judge(Base):
     __tablename__ = 'judge'
     id = Column(Integer, primary_key=True)
     name = Column(String)
+
+
+class JudgementContent(Base):
+    __tablename__ = 'judgement_content'
+    id = Column(Integer, primary_key=True)
+    judgement_id = Column(Integer, ForeignKey('judgement.id'))
+    content_type = Column(String, index=True)
+    content_hash = Column(String, index=True)
+    content = Column(String)
+
+    judgement = relationship('Judgement', backref='contents')

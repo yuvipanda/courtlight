@@ -32,16 +32,12 @@ import os
 import subprocess
 import hashlib
 import orm
+import utils
 from sqlalchemy import create_engine, exists
 from sqlalchemy.orm import sessionmaker
 
 
 
-def filename_for_download_link(download_link):
-    return os.path.join(
-        'judgements',
-        quote(download_link, safe='.')
-    )
 
 async def fetch_judges():
     """
@@ -150,9 +146,6 @@ async def main():
             judge = orm.Judge(name=name)
             session.add(judge)
 
-        from ipdb import set_trace
-        set_trace()
-
         async for case_data in fetch_cases(name, judge_id, args.from_date, args.to_date):
             case_number = case_data['case_number']
             pdf_link = case_data['pdf_link'] 
@@ -163,23 +156,55 @@ async def main():
             judgement = session.query(orm.Judgement).filter_by(pdf_link=pdf_link).first()
             if not judgement:
                 judgement = orm.Judgement(pdf_link=pdf_link, date=date)
+                judgement.judges.append(judgement)
                 session.add(judgement)
-
-            if judge not in judgement.judges:
-                judgement.judges.append(judge)
-                session.add(judgement)
-                logging.info(f'Added judge {name} to case {case_number}')
+            else:
+                if judge not in judgement.judges:
+                    judgement.judges.append(judge)
+                    session.add(judgement)
+                    logging.info(f'Added judge {name} to case {case_number}')
 
             # If case number exists, we skip
             if not session.query(exists().where(orm.Case.case_number==case_number)).scalar():
                 case = orm.Case(case_number=case_data['case_number'], party=case_data['party'], judgement=judgement)
                 session.add(case)
+                logging.info(f'Added case entry for {case_number}')
             else:
                 logging.info(f'{case_number} skipped, already exists')
-            logging.info(f'Added case entry for {case_number}')
 
     # Commit only on success. This keeps our db churn small
     session.commit()
+
+    if args.populate_contents:
+        await populate_contents(session)
+
+
+def filename_for_download_link(download_link):
+    return os.path.join(
+        'judgements',
+        quote(download_link, safe='.')
+    )
+
+async def populate_contents(session):
+    judgements = session.query(orm.Judgement).all()
+
+    async with aiohttp.ClientSession() as http_session:
+        for judgement in judgements:
+            if len(judgement.contents) == 0:
+                download_path = filename_for_download_link(judgement.pdf_link)
+                if not os.path.exists(download_path):
+                    await utils.download_file(http_session, judgement.pdf_link, download_path)
+                else:
+                    logging.info(f'Skipped downloading {judgement.pdf_link}, exists')
+                text = utils.pdf_to_text(download_path)
+                hash = hashlib.sha256()
+                hash.update(text.encode('utf-8'))
+                content = orm.JudgementContent(
+                    judgement=judgement, content_type='text/plain', content=text, content_hash=hash.hexdigest()
+                )
+                session.add(judgement)
+                session.commit()
+                logging.info(f'Populated content for judgement {judgement.pdf_link}')
 
 
 def parse_args():
@@ -195,6 +220,12 @@ def parse_args():
     argparser.add_argument(
         'db_path',
         help='Path to sqlite database for writing data into'
+    )
+    argparser.add_argument(
+        '--populate-contents',
+        default=True,
+        action='store_true',
+        help='Populate contents of judgements in database'
     )
     return argparser.parse_args()
 
