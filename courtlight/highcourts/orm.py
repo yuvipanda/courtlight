@@ -1,8 +1,8 @@
 import sqlalchemy
 
 from sqlalchemy.ext.declarative import declarative_base
-from sqlalchemy import Column, Integer, String, Date, ForeignKey, Table
-from sqlalchemy.orm import relationship
+from sqlalchemy import Column, Integer, String, Date, ForeignKey, Table, create_engine
+from sqlalchemy.orm import relationship, sessionmaker
 
 Base = declarative_base()
 
@@ -47,3 +47,15 @@ class JudgementContent(Base):
     content = Column(String)
 
     judgement = relationship('Judgement', backref='contents')
+
+
+Session = sessionmaker()
+session = None
+def get_session(db_path):
+    global session
+    if session is None:
+        engine = create_engine(f'sqlite:///{db_path}')
+        Base.metadata.create_all(engine)
+        Session.configure(bind=engine)
+        session = Session()
+    return session

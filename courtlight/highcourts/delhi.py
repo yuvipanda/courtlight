@@ -132,12 +132,7 @@ async def main():
 
     logging.basicConfig(format='%(asctime)s %(message)s', level=logging.INFO)
 
-    Session = sessionmaker()
-    engine = create_engine(f'sqlite:///{args.db_path}')
-    orm.Base.metadata.create_all(engine)
-    Session.configure(bind=engine)
-    session = Session()
-
+    session = orm.get_session(args.db_path)
     async for name, judge_id in fetch_judges():
         # Check if judge exists, if not create
         logging.info(f'Started scraping cases for {name}')
