@@ -126,58 +126,57 @@ async def fetch_cases(judge_name, judge_id, from_date, to_date):
                     for case in cases_from_page(judge_name, doc):
                         yield case
 
-                
-async def main():
-    args = parse_args()
-
-    logging.basicConfig(format='%(asctime)s %(message)s', level=logging.INFO)
-
-    session = orm.get_session(args.db_path)
+async def scrape_cases(db_session, from_date, to_date):
     async for name, judge_id in fetch_judges():
         # Check if judge exists, if not create
         logging.info(f'Started scraping cases for {name}')
-        judge = session.query(orm.Judge).filter_by(name=name).first()
+        judge = db_session.query(orm.Judge).filter_by(name=name).first()
         if not judge:
             judge = orm.Judge(name=name)
-            session.add(judge)
+            db_session.add(judge)
 
-        async for case_data in fetch_cases(name, judge_id, args.from_date, args.to_date):
+        async for case_data in fetch_cases(name, judge_id, from_date, to_date):
             case_number = case_data['case_number']
             pdf_link = case_data['pdf_link'] 
             date = case_data['date'] 
             
 
             # Create Judgement if it doesn't exist
-            judgement = session.query(orm.Judgement).filter_by(pdf_link=pdf_link).first()
+            judgement = db_session.query(orm.Judgement).filter_by(pdf_link=pdf_link).first()
             if not judgement:
                 judgement = orm.Judgement(pdf_link=pdf_link, date=date, judges=[judge])
-                session.add(judgement)
+                db_session.add(judgement)
             else:
                 if judge not in judgement.judges:
                     judgement.judges.append(judge)
-                    session.add(judgement)
+                    db_session.add(judgement)
                     logging.info(f'Added judge {name} to case {case_number}')
 
             # If case number exists, we skip
-            if not session.query(exists().where(orm.Case.case_number==case_number)).scalar():
+            if not db_session.query(exists().where(orm.Case.case_number==case_number)).scalar():
                 case = orm.Case(case_number=case_data['case_number'], party=case_data['party'], judgement=judgement)
-                session.add(case)
+                db_session.add(case)
                 logging.info(f'Added case entry for {case_number}')
             else:
                 logging.info(f'{case_number} skipped, already exists')
 
     # Commit only on success. This keeps our db churn small
-    session.commit()
-
-    if args.populate_contents:
-        await populate_contents(session)
+    db_session.commit()
 
 
-def filename_for_download_link(download_link):
-    return os.path.join(
-        'judgements',
-        quote(download_link, safe='.')
-    )
+async def main():
+    args = parse_args()
+
+    logging.basicConfig(format='%(asctime)s %(message)s', level=logging.INFO)
+
+    db_session = orm.get_session(args.db_path)
+
+    action = args.action
+
+    if action == 'scrape-cases':
+        await scrape_cases(db_session, args.from_date, args.to_date)
+    elif action == 'populate-contents':
+        await populate_contents(db_session)
 
 async def populate_contents(session):
     judgements = session.query(orm.Judgement).all()
@@ -185,7 +184,7 @@ async def populate_contents(session):
     async with aiohttp.ClientSession() as http_session:
         for judgement in judgements:
             if len(judgement.contents) == 0:
-                download_path = filename_for_download_link(judgement.pdf_link)
+                download_path = os.path.join('judgements', quote(judgement.pdf_link, safe='.'))
                 if not os.path.exists(download_path):
                     await utils.download_file(http_session, judgement.pdf_link, download_path)
                 else:
@@ -203,23 +202,30 @@ async def populate_contents(session):
 
 def parse_args():
     argparser = argparse.ArgumentParser()
-    argparser.add_argument(
-        'from_date',
-        help='Date to start looking for judgements from, in format dd/mm/yyyy'
-    )
-    argparser.add_argument(
-        'to_date',
-        help='Date to look for judgements till, in format dd/mm/yyyy'
-    )
+
     argparser.add_argument(
         'db_path',
         help='Path to sqlite database for writing data into'
     )
-    argparser.add_argument(
-        '--populate-contents',
-        default=True,
-        action='store_true',
-        help='Populate contents of judgements in database'
+    subparsers = argparser.add_subparsers(dest='action')
+
+    scrape_parser = subparsers.add_parser(
+        'scrape-cases',
+        help='Scrape case info for all judges '
+    )
+
+    scrape_parser.add_argument(
+        'from_date',
+        help='Date to start looking for judgements from, in format dd/mm/yyyy'
+    )
+    scrape_parser.add_argument(
+        'to_date',
+        help='Date to look for judgements till, in format dd/mm/yyyy'
+    )
+
+    populate_contents_parser = subparsers.add_parser(
+        'populate-contents',
+        help='Populate text content for all judgements missing text content'
     )
     return argparser.parse_args()
 
