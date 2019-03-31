@@ -15,6 +15,9 @@ class Case(Base):
 
     judgement = relationship("Judgement", backref="cases")
 
+    def __str__(self):
+        return self.case_number
+
 judgement_authorship = Table('judgement_authorship', Base.metadata,
     Column('judgement_id', Integer, ForeignKey('judgement.id')),
     Column('judge_id', Integer, ForeignKey('judge.id'))
@@ -38,6 +41,9 @@ class Judge(Base):
     __tablename__ = 'judge'
     id = Column(Integer, primary_key=True)
     name = Column(String)
+
+    def __str__(self):
+        return self.name
 
 
 Session = sessionmaker()
