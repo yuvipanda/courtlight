@@ -1,42 +1,12 @@
 #!/usr/bin/env python3
-"""
-Scrape data from Delhi High Court Website.
-
-The website is in PHP, and makes extremely heavy use of
-PHP Server Side Sessions. The way it does pagination is:
-
-1. You visit the 'home' page. This makes a new PHP session for you.
-2. You send a POST request to a query URL with your search
-   query
-3. You get first page of results, and in the server-side session
-   your query info is saved
-4. For the following pages, you send a GET request to the same URL,
-   with just an offset param - nothing at all about the original query!
-   So you can only linearly ask for pages for one judge at a time,
-   one period at a time, per cookie jar. 
-We first gather the list of all judges, and use a new ClientSession
-for each judge. This lets us cleanly separate cookie jars, and 
-increase concurrency in the future if we need.
-"""
-
 import aiohttp
 import logging
-import asyncio
-import argparse
 import backoff
-import json
 from lxml import html
 from datetime import datetime
-from urllib.parse import quote
-import os
-import subprocess
-import hashlib
 import orm
 import utils
-from sqlalchemy import create_engine, exists
-from sqlalchemy.orm import sessionmaker
-
-
+from sqlalchemy import exists
 
 
 async def fetch_judges():
@@ -162,72 +132,3 @@ async def scrape_cases(db_session, from_date, to_date):
 
     # Commit only on success. This keeps our db churn small
     db_session.commit()
-
-
-async def main():
-    args = parse_args()
-
-    logging.basicConfig(format='%(asctime)s %(message)s', level=logging.INFO)
-
-    db_session = orm.get_session(args.db_path)
-
-    action = args.action
-
-    if action == 'scrape-cases':
-        await scrape_cases(db_session, args.from_date, args.to_date)
-    elif action == 'populate-contents':
-        await populate_contents(db_session)
-
-async def populate_contents(session):
-    judgements = session.query(orm.Judgement).all()
-
-    async with aiohttp.ClientSession() as http_session:
-        for judgement in judgements:
-            if len(judgement.contents) == 0:
-                download_path = os.path.join('judgements', quote(judgement.pdf_link, safe='.'))
-                if not os.path.exists(download_path):
-                    await utils.download_file(http_session, judgement.pdf_link, download_path)
-                else:
-                    logging.info(f'Skipped downloading {judgement.pdf_link}, exists')
-                text = utils.pdf_to_text(download_path)
-                hash = hashlib.sha256()
-                hash.update(text.encode('utf-8'))
-                content = orm.JudgementContent(
-                    judgement=judgement, content_type='text/plain', content=text, content_hash=hash.hexdigest()
-                )
-                session.add(judgement)
-                session.commit()
-                logging.info(f'Populated content for judgement {judgement.pdf_link}')
-
-
-def parse_args():
-    argparser = argparse.ArgumentParser()
-
-    argparser.add_argument(
-        'db_path',
-        help='Path to sqlite database for writing data into'
-    )
-    subparsers = argparser.add_subparsers(dest='action')
-
-    scrape_parser = subparsers.add_parser(
-        'scrape-cases',
-        help='Scrape case info for all judges '
-    )
-
-    scrape_parser.add_argument(
-        'from_date',
-        help='Date to start looking for judgements from, in format dd/mm/yyyy'
-    )
-    scrape_parser.add_argument(
-        'to_date',
-        help='Date to look for judgements till, in format dd/mm/yyyy'
-    )
-
-    populate_contents_parser = subparsers.add_parser(
-        'populate-contents',
-        help='Populate text content for all judgements missing text content'
-    )
-    return argparser.parse_args()
-
-loop = asyncio.get_event_loop()
-loop.run_until_complete(main())
