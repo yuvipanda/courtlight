@@ -2,8 +2,8 @@ from flask import Flask
 from flask_admin import Admin
 from flask_admin.contrib.sqla import ModelView
 
-from highcourts.orm import get_session
-from highcourts.orm import Judgement, Judge, Case
+from .highcourts.orm import get_session
+from .highcourts.orm import Judgement, Judge, Case
 
 app = Flask(__name__)
 
@@ -12,7 +12,8 @@ app.config['FLASK_ADMIN_SWATCH'] = 'cerulean'
 
 admin = Admin(app, name='courtlight', template_mode='bootstrap3')
 
-session = get_session('test-delhi.sqlite')
+db_path = os.environ['DB_PATH']
+session = get_session(db_path)
 
 class JudgementView(ModelView):
     can_delete = False
@@ -35,4 +36,5 @@ class JudgementView(ModelView):
 
 admin.add_view(JudgementView(Judgement, session))
 
-app.run()
+if __name__ == '__main__':
+    app.run()
