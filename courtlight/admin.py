@@ -1,7 +1,11 @@
+import os
 from flask import Flask
 from flask_admin import Admin
 from flask_admin.contrib.sqla import ModelView
+from flask_sqlalchemy_session import flask_scoped_session
 
+from sqlalchemy.orm import sessionmaker
+from sqlalchemy import create_engine
 from .highcourts.orm import get_session
 from .highcourts.orm import Judgement, Judge, Case
 
@@ -13,7 +17,10 @@ app.config['FLASK_ADMIN_SWATCH'] = 'cerulean'
 admin = Admin(app, name='courtlight', template_mode='bootstrap3')
 
 db_path = os.environ['DB_PATH']
-session = get_session(db_path)
+engine = create_engine(f'sqlite:///{db_path}')
+Session = sessionmaker()
+Session.configure(bind=engine)
+session = flask_scoped_session(Session, app)
 
 class JudgementView(ModelView):
     can_delete = False
