@@ -3,3 +3,5 @@ aiohttp
 lxml
 cssselect
 sqlalchemy
+flask-sqlalchemy-session
+flask-admin
