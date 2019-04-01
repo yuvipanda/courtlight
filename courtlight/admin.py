@@ -33,7 +33,7 @@ class JudgementView(ModelView):
 
     inline_models = (Case, Judge)
 
-    column_list = ['date', 'pdf_link', 'text_content', 'judges', 'cases']
+    column_list = ['date', 'pdf_link', 'judges', 'cases']
     column_labels = {
         'date': 'Date of Judgement',
         'pdf_link': 'View Judgement',
